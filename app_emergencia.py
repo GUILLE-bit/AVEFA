@@ -26,6 +26,13 @@ THR_BAJO_MEDIO = 0.020
 THR_MEDIO_ALTO = 0.079
 assert THR_MEDIO_ALTO > THR_BAJO_MEDIO, "THR_MEDIO_ALTO debe ser mayor que THR_BAJO_MEDIO"
 
+# ====================== Umbrales EMEAC (EDITAR AQUÍ) ======================
+# EMEAC se calcula a partir del acumulado de EMERREL dividido por estos denominadores
+EMEAC_MIN_DEN = 1.20   # “mínimo”
+EMEAC_ADJ_DEN = 2.70   # “ajustable”
+EMEAC_MAX_DEN = 3.00   # “máximo”
+assert 0 < EMEAC_MIN_DEN <= EMEAC_ADJ_DEN <= EMEAC_MAX_DEN, "Asegurá MIN <= ADJ <= MAX"
+
 # ====================== Colores por nivel ======================
 COLOR_MAP = {"Bajo": "#2ca02c", "Medio": "#ff7f0e", "Alto": "#d62728"}  # verde / naranja / rojo
 COLOR_FALLBACK = "#808080"
@@ -120,18 +127,18 @@ with st.expander("Origen de pesos del modelo (.npy)", expanded=False):
     st.markdown(f"- **Repositorio**: `{GITHUB_BASE_URL}`")
     st.markdown(f"- Archivos: `{FNAME_IW}`, `{FNAME_BIW}`, `{FNAME_LW}`, `{FNAME_BOUT}`")
 
-with st.expander("Parámetros EMERREL (editables en código)", expanded=False):
-    st.markdown(f"- **Bajo→Medio**: `< {THR_BAJO_MEDIO:.3f}`")
-    st.markdown(f"- **Medio→Alto**: `≤ {THR_MEDIO_ALTO:.3f}`")
-    st.caption("Para cambiarlos, editar THR_BAJO_MEDIO y THR_MEDIO_ALTO al inicio del script.")
+with st.expander("Parámetros (editables en código)", expanded=False):
+    st.markdown(f"**EMERREL**:")
+    st.markdown(f"- Bajo→Medio: `< {THR_BAJO_MEDIO:.3f}`")
+    st.markdown(f"- Medio→Alto: `≤ {THR_MEDIO_ALTO:.3f}`")
+    st.markdown(f"**EMEAC** (denominadores):")
+    st.markdown(f"- Mínimo: `{EMEAC_MIN_DEN:.2f}` · Ajustable: `{EMEAC_ADJ_DEN:.2f}` · Máximo: `{EMEAC_MAX_DEN:.2f}`")
 
 st.sidebar.header("Meteo")
 csv_pages = st.sidebar.text_input("CSV (Pages)", value="https://GUILLE-bit.github.io/ANN/meteo_daily.csv")
 csv_raw   = st.sidebar.text_input("CSV (Raw)",   value="https://raw.githubusercontent.com/GUILLE-bit/ANN/gh-pages/meteo_daily.csv")
 fuente_meteo = st.sidebar.radio("Fuente meteo", ["Automático (CSV público)", "Subir Excel meteo"])
 
-st.sidebar.header("Configuración")
-umbral_usuario = st.sidebar.number_input("Umbral de EMEAC para 100%", min_value=1.2, max_value=3.0, value=2.70, step=0.01, format="%.2f")
 if st.sidebar.button("Limpiar caché"):
     st.cache_data.clear()
 
@@ -206,10 +213,10 @@ if dfs:
         pred["EMERREL acumulado"] = pred["EMERREL(0-1)"].cumsum()
         pred["EMERREL_MA5"] = pred["EMERREL(0-1)"].rolling(window=5, min_periods=1).mean()
 
-        # EMEAC (%) acumulado anual y rango
-        pred["EMEAC (0-1) - mínimo"] = pred["EMERREL acumulado"] / 1.2
-        pred["EMEAC (0-1) - máximo"] = pred["EMERREL acumulado"] / 3.0
-        pred["EMEAC (0-1) - ajustable"] = pred["EMERREL acumulado"] / umbral_usuario
+        # EMEAC (%) acumulado anual y rango (usando denominadores fijos del código)
+        pred["EMEAC (0-1) - mínimo"]    = pred["EMERREL acumulado"] / EMEAC_MIN_DEN
+        pred["EMEAC (0-1) - máximo"]    = pred["EMERREL acumulado"] / EMEAC_MAX_DEN
+        pred["EMEAC (0-1) - ajustable"] = pred["EMERREL acumulado"] / EMEAC_ADJ_DEN
         for col in ["EMEAC (0-1) - mínimo", "EMEAC (0-1) - máximo", "EMEAC (0-1) - ajustable"]:
             pred[col.replace("(0-1)", "(%)")] = (pred[col] * 100).clip(0, 100)
 
@@ -225,13 +232,13 @@ if dfs:
             continue
 
         pred_vis["EMERREL acumulado (reiniciado)"] = pred_vis["EMERREL(0-1)"].cumsum()
-        pred_vis["EMEAC (0-1) - mínimo (rango)"]    = pred_vis["EMERREL acumulado (reiniciado)"] / 1.2
-        pred_vis["EMEAC (0-1) - máximo (rango)"]    = pred_vis["EMERREL acumulado (reiniciado)"] / 3.0
-        pred_vis["EMEAC (0-1) - ajustable (rango)"] = pred_vis["EMERREL acumulado (reiniciado)"] / umbral_usuario
+        pred_vis["EMEAC (0-1) - mínimo (rango)"]    = pred_vis["EMERREL acumulado (reiniciado)"] / EMEAC_MIN_DEN
+        pred_vis["EMEAC (0-1) - máximo (rango)"]    = pred_vis["EMERREL acumulado (reiniciado)"] / EMEAC_MAX_DEN
+        pred_vis["EMEAC (0-1) - ajustable (rango)"] = pred_vis["EMERREL acumulado (reiniciado)"] / EMEAC_ADJ_DEN
         for col in ["EMEAC (0-1) - mínimo (rango)", "EMEAC (0-1) - máximo (rango)", "EMEAC (0-1) - ajustable (rango)"]:
             pred_vis[col.replace("(0-1)", "(%)")] = (pred_vis[col] * 100).clip(0, 100)
 
-        # Colores por nivel
+        # Colores por nivel (verde/naranja/rojo)
         colores_vis = obtener_colores(pred_vis["Nivel_Emergencia_relativa"])
 
         # --- Gráfico EMERREL (barras coloreadas + leyenda por niveles) ---
@@ -258,9 +265,9 @@ if dfs:
         st.subheader(f"EMEAC (%) · {nombre} · {fi.date()} → {ff.date()} (reinicio 1/feb)")
         fig, ax = plt.subplots(figsize=(14, 5), dpi=150)
         ax.fill_between(pred_vis["Fecha"], pred_vis["EMEAC (%) - mínimo (rango)"], pred_vis["EMEAC (%) - máximo (rango)"], alpha=0.35, label="Rango min–max")
-        ax.plot(pred_vis["Fecha"], pred_vis["EMEAC (%) - ajustable (rango)"], linewidth=2.5, label="Umbral ajustable")
-        ax.plot(pred_vis["Fecha"], pred_vis["EMEAC (%) - mínimo (rango)"], linestyle="--", linewidth=1.5, label="Umbral mínimo")
-        ax.plot(pred_vis["Fecha"], pred_vis["EMEAC (%) - máximo (rango)"], linestyle="--", linewidth=1.5, label="Umbral máximo")
+        ax.plot(pred_vis["Fecha"], pred_vis["EMEAC (%) - ajustable (rango)"], linewidth=2.5, label=f"Aj. (/{EMEAC_ADJ_DEN:.2f})")
+        ax.plot(pred_vis["Fecha"], pred_vis["EMEAC (%) - mínimo (rango)"], linestyle="--", linewidth=1.5, label=f"Mín. (/{EMEAC_MIN_DEN:.2f})")
+        ax.plot(pred_vis["Fecha"], pred_vis["EMEAC (%) - máximo (rango)"], linestyle="--", linewidth=1.5, label=f"Máx. (/{EMEAC_MAX_DEN:.2f})")
         ax.grid(True, linestyle="--", alpha=0.5); ax.set_ylim(0,100); ax.set_xlim(fi, ff)
         ax.set_xlabel("Fecha"); ax.set_ylabel("EMEAC (%)")
         ax.xaxis.set_major_locator(mdates.MonthLocator()); ax.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
@@ -283,4 +290,5 @@ if dfs:
             file_name=f"{nombre}_resultados_rango.csv",
             mime="text/csv"
         )
+
 
