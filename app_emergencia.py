@@ -1,10 +1,10 @@
-
 # app_emergencia.py
 import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from matplotlib.patches import Patch
 from io import BytesIO, StringIO
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
@@ -206,16 +206,28 @@ if dfs:
         for col in ["EMEAC (0-1) - mínimo (rango)", "EMEAC (0-1) - máximo (rango)", "EMEAC (0-1) - ajustable (rango)"]:
             pred_vis[col.replace("(0-1)", "(%)")] = (pred_vis[col] * 100).clip(0, 100)
 
+        # Colores por nivel (verde/naranja/rojo)
         colores_vis = obtener_colores(pred_vis["Nivel_Emergencia_relativa"])
 
-        # --- Gráfico EMERREL ---
+        # --- Gráfico EMERREL (con leyenda de niveles) ---
         st.subheader(f"EMERREL (0-1) · {nombre} · {fi.date()} → {ff.date()} (reinicio 1/feb)")
         fig_er, ax_er = plt.subplots(figsize=(14, 5), dpi=150)
         ax_er.bar(pred_vis["Fecha"], pred_vis["EMERREL(0-1)"], color=colores_vis)
-        ax_er.plot(pred_vis["Fecha"], pred_vis["EMERREL_MA5"], linewidth=2.2, label="Media móvil 5 días")
-        ax_er.legend(loc="upper right"); ax_er.grid(True, linestyle="--", alpha=0.5)
+        line_ma, = ax_er.plot(pred_vis["Fecha"], pred_vis["EMERREL_MA5"], linewidth=2.2, label="Media móvil 5 días")
+        ax_er.grid(True, linestyle="--", alpha=0.5)
         ax_er.set_xlabel("Fecha"); ax_er.set_ylabel("EMERREL (0-1)")
-        ax_er.set_xlim(fi, ff); ax_er.xaxis.set_major_locator(mdates.MonthLocator()); ax_er.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+        ax_er.set_xlim(fi, ff)
+        ax_er.xaxis.set_major_locator(mdates.MonthLocator())
+        ax_er.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+
+        # Leyenda personalizada para niveles + línea MA5
+        level_handles = [
+            Patch(facecolor="green", edgecolor="green", label="Bajo"),
+            Patch(facecolor="orange", edgecolor="orange", label="Medio"),
+            Patch(facecolor="red", edgecolor="red", label="Alto"),
+            line_ma
+        ]
+        ax_er.legend(handles=level_handles, title="Niveles EMERREL", loc="upper right")
         st.pyplot(fig_er)
 
         # --- Gráfico EMEAC ---
@@ -230,12 +242,16 @@ if dfs:
         ax.xaxis.set_major_locator(mdates.MonthLocator()); ax.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
         ax.legend(loc="lower right"); st.pyplot(fig)
 
-        # --- Tabla y descarga (en memoria) ---
+        # --- Tabla y descarga (con colores en texto) ---
         st.subheader(f"Resultados (1/feb → 1/nov) - {nombre}")
         col_emeac = "EMEAC (%) - ajustable (rango)"
-        tabla = pred_vis[["Fecha","Julian_days","Nivel_Emergencia_relativa",col_emeac]].rename(
-            columns={"Nivel_Emergencia_relativa":"Nivel de EMERREL", col_emeac:"EMEAC (%)"}
-        )
+
+        # Mapeo con íconos de color
+        nivel_icono = {"Bajo": "🟢 Bajo", "Medio": "🟠 Medio", "Alto": "🔴 Alto"}
+        tabla = pred_vis[["Fecha","Julian_days","Nivel_Emergencia_relativa",col_emeac]].copy()
+        tabla["Nivel_Emergencia_relativa"] = tabla["Nivel_Emergencia_relativa"].map(nivel_icono)
+
+        tabla = tabla.rename(columns={"Nivel_Emergencia_relativa":"Nivel de EMERREL", col_emeac:"EMEAC (%)"})
         st.dataframe(tabla, use_container_width=True)
 
         csv_buf = StringIO()
