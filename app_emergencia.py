@@ -9,18 +9,17 @@ from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 from pathlib import Path
 import os
+from urllib.parse import urlparse
 
 st.set_page_config(page_title="Predicción de Emergencia Agrícola AVEFA", layout="wide")
 
 # ====================== Utilidades de E/S segura ======================
 def safe_tmp_dir() -> Path:
-    """Devuelve un Path escribible (en Streamlit Cloud, /tmp)."""
     p = Path(os.environ.get("TMPDIR", "/tmp"))
     p.mkdir(parents=True, exist_ok=True)
     return p
 
 def tmp_path(filename: str) -> Path:
-    """Ruta segura dentro de /tmp para escribir si fuera necesario."""
     return safe_tmp_dir() / filename
 
 # ====================== Descarga y carga remota ======================
@@ -42,6 +41,51 @@ def load_npy_from_url(url: str) -> np.ndarray:
     raw = _fetch_bytes(url)
     return np.load(BytesIO(raw), allow_pickle=True)
 
+def normalize_base_raw(base: str) -> str:
+    """
+    Acepta:
+      - RAW ya correcto: https://raw.githubusercontent.com/USER/REPO/BRANCH[/subpath]
+      - URL de GitHub 'blob': https://github.com/USER/REPO/blob/BRANCH/subpath
+    Devuelve siempre RAW base sin barra final.
+    """
+    base = base.strip().rstrip("/")
+    if "raw.githubusercontent.com" in base:
+        return base
+    if "github.com" in base and "/blob/" in base:
+        # convertir /github.com/u/r/blob/branch/path  -> /raw.githubusercontent.com/u/r/branch/path
+        parts = base.split("github.com/", 1)[1]  # USER/REPO/blob/BRANCH/...
+        user, repo, _blob, branch, *rest = parts.split("/")
+        raw = "https://raw.githubusercontent.com/" + "/".join([user, repo, branch] + rest)
+        return raw.rstrip("/")
+    return base  # dejar tal cual si es otra CDN válida
+
+def join_url(base: str, *segments: str) -> str:
+    base = base.rstrip("/")
+    segs = [s.strip("/") for s in segments if s and s.strip("/")]
+    return "/".join([base] + segs)
+
+def resolve_weight_url(base_raw: str, fname: str) -> tuple[str, str]:
+    """
+    Devuelve (url_encontrada, estrategia) probando:
+      1) base_raw/fname
+      2) base_raw/pesos/fname  (si la 1) falla)
+    """
+    base_raw = normalize_base_raw(base_raw)
+    candidates = [
+        ("raiz", join_url(base_raw, fname)),
+        ("carpeta_pesos", join_url(base_raw, "pesos", fname)),
+    ]
+    last_err = None
+    for tag, url in candidates:
+        try:
+            _ = _fetch_bytes(url)  # HEAD "manual" con GET corto: si responde, sirve
+            return url, tag
+        except Exception as e:
+            last_err = e
+            continue
+    raise RuntimeError(f"No se pudo localizar {fname} en la base dada. Último error: {last_err}")
+
+# ====================== CSV público ======================
 @st.cache_data(ttl=900)
 def load_public_csv(csv_pages: str, csv_raw: str):
     last_err = None
@@ -100,38 +144,37 @@ class PracticalANNModel:
 # ====================== UI ======================
 st.title("Predicción de Emergencia Agrícola AVEFA")
 
-st.sidebar.header("Pesos .npy (URLs RAW de GitHub)")
-base_raw = st.sidebar.text_input(
-    "Base RAW",
-    value="https://raw.githubusercontent.com/USUARIO/REPO/main/pesos",
-    help="Pega aquí la carpeta RAW donde están los .npy (sin la barra final opcional)."
+st.sidebar.header("Pesos .npy (GitHub)")
+base_raw_in = st.sidebar.text_input(
+    "Base (puede ser RAW o URL con /blob/)",
+    value="https://raw.githubusercontent.com/USUARIO/REPO/main",  # SIN carpeta 'pesos' por tu caso actual
+    help="Ejemplos válidos: RAW (raw.githubusercontent.com/USER/REPO/BRANCH[/carpeta]) o github.com/USER/REPO/blob/BRANCH/carpeta"
 )
 
-def _join(base, name):
-    return base.rstrip("/") + "/" + name.lstrip("/")
-
-fname_IW = st.sidebar.text_input("Archivo IW.npy", value="IW.npy")
-fname_bIW = st.sidebar.text_input("Archivo bias_IW.npy", value="bias_IW.npy")
-fname_LW = st.sidebar.text_input("Archivo LW.npy", value="LW.npy")
+fname_IW   = st.sidebar.text_input("Archivo IW.npy", value="IW.npy")
+fname_bIW  = st.sidebar.text_input("Archivo bias_IW.npy", value="bias_IW.npy")
+fname_LW   = st.sidebar.text_input("Archivo LW.npy", value="LW.npy")
 fname_bout = st.sidebar.text_input("Archivo bias_out.npy", value="bias_out.npy")
-
-url_IW = _join(base_raw, fname_IW)
-url_bIW = _join(base_raw, fname_bIW)
-url_LW = _join(base_raw, fname_LW)
-url_bout = _join(base_raw, fname_bout)
 
 colA, colB = st.sidebar.columns(2)
 with colA:
-    if st.button("Probar URLs"):
+    if st.button("Probar y resolver URLs"):
         try:
-            _ = _fetch_bytes(url_IW); _ = _fetch_bytes(url_bIW); _ = _fetch_bytes(url_LW); _ = _fetch_bytes(url_bout)
-            st.success("Las 4 URLs responden correctamente ✅")
+            url_IW, tag_IW     = resolve_weight_url(base_raw_in, fname_IW)
+            url_bIW, tag_bIW   = resolve_weight_url(base_raw_in, fname_bIW)
+            url_LW, tag_LW     = resolve_weight_url(base_raw_in, fname_LW)
+            url_bout, tag_bout = resolve_weight_url(base_raw_in, fname_bout)
+            st.success("Encontré rutas válidas para los 4 archivos ✅")
+            st.caption(f"IW: {url_IW}  ({tag_IW})")
+            st.caption(f"bias_IW: {url_bIW}  ({tag_bIW})")
+            st.caption(f"LW: {url_LW}  ({tag_LW})")
+            st.caption(f"bias_out: {url_bout}  ({tag_bout})")
         except Exception as e:
             st.error(str(e))
 
 st.sidebar.header("Meteo")
 csv_pages = st.sidebar.text_input("CSV (Pages)", value="https://GUILLE-bit.github.io/ANN/meteo_daily.csv")
-csv_raw   = st.sidebar.text_input("CSV (Raw)", value="https://raw.githubusercontent.com/GUILLE-bit/ANN/gh-pages/meteo_daily.csv")
+csv_raw   = st.sidebar.text_input("CSV (Raw)",   value="https://raw.githubusercontent.com/GUILLE-bit/ANN/gh-pages/meteo_daily.csv")
 fuente_meteo = st.sidebar.radio("Fuente meteo", ["Automático (CSV público)", "Subir Excel meteo"])
 
 st.sidebar.header("Configuración")
@@ -139,13 +182,20 @@ umbral_usuario = st.sidebar.number_input("Umbral de EMEAC para 100%", min_value=
 if st.sidebar.button("Limpiar caché"):
     st.cache_data.clear()
 
-# --- Cargar pesos .npy desde GitHub ---
+# --- Resolver y cargar pesos .npy desde GitHub (con autodetección raiz/pesos) ---
 try:
-    IW = load_npy_from_url(url_IW)
+    url_IW, tag_IW     = resolve_weight_url(base_raw_in, fname_IW)
+    url_bIW, tag_bIW   = resolve_weight_url(base_raw_in, fname_bIW)
+    url_LW, tag_LW     = resolve_weight_url(base_raw_in, fname_LW)
+    url_bout, tag_bout = resolve_weight_url(base_raw_in, fname_bout)
+
+    IW      = load_npy_from_url(url_IW)
     bias_IW = load_npy_from_url(url_bIW)
-    LW = load_npy_from_url(url_LW)
+    LW      = load_npy_from_url(url_LW)
     bias_out = load_npy_from_url(url_bout).item()
+
     st.caption(f"Pesos cargados · H={IW.shape[1]} neuronas ocultas")
+    st.caption(f"(Origen detectado: {tag_IW}, {tag_bIW}, {tag_LW}, {tag_bout})")
 except Exception as e:
     st.error(f"No pude cargar los .npy desde GitHub: {e}")
     st.stop()
@@ -167,7 +217,7 @@ if fuente_meteo == "Automático (CSV público)":
     try:
         df_auto, url_usada = load_public_csv(csv_pages, csv_raw)
         dfs.append(("MeteoBahia_CSV", df_auto))
-        st.caption(f"CSV usado: {url_usada} · {df_auto['Fecha'].min().date()} → {df_auto['Fecha'].max().date()} · {len[df_auto]} días")
+        st.caption(f"CSV usado: {url_usada} · {df_auto['Fecha'].min().date()} → {df_auto['Fecha'].max().date()} · {len(df_auto)} días")
     except Exception as e:
         st.error(f"No se pudo leer el CSV público: {e}")
 else:
@@ -262,7 +312,6 @@ if dfs:
         )
         st.dataframe(tabla, use_container_width=True)
 
-        # Descarga CSV sin tocar disco
         csv_buf = StringIO()
         tabla.to_csv(csv_buf, index=False)
         st.download_button(
@@ -272,9 +321,4 @@ if dfs:
             mime="text/csv"
         )
 
-# ====== (Opcional) ejemplo de escritura segura a /tmp si alguna vez necesitás guardar algo ======
-# ej_path = tmp_path("registro_debug.txt")
-# with open(ej_path, "w", encoding="utf-8") as f:
-#     f.write("Debug de la sesión...")
-# st.caption(f"(Debug guardado en {ej_path})")
 
