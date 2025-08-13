@@ -29,7 +29,7 @@ assert THR_MEDIO_ALTO > THR_BAJO_MEDIO, "THR_MEDIO_ALTO debe ser mayor que THR_B
 # ====================== Umbrales EMEAC (EDITAR AQUÍ) ======================
 # EMEAC se calcula a partir del acumulado de EMERREL dividido por estos denominadores
 EMEAC_MIN_DEN = 1.20   # “mínimo”
-EMEAC_ADJ_DEN = 2.70   # “ajustable”
+EMEAC_ADJ_DEN = 2.1 # “ajustable”
 EMEAC_MAX_DEN = 3.00   # “máximo”
 assert 0 < EMEAC_MIN_DEN <= EMEAC_ADJ_DEN <= EMEAC_MAX_DEN, "Asegurá MIN <= ADJ <= MAX"
 
