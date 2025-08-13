@@ -13,16 +13,25 @@ import os
 
 st.set_page_config(page_title="Predicción de Emergencia Agrícola AVEFA", layout="wide")
 
-# ====================== Config pesos (fijado a tu repo) ======================
+# ====================== Config pesos (fijo a tu repo) ======================
 GITHUB_BASE_URL = "https://raw.githubusercontent.com/GUILLE-bit/AVEFA/main"
 FNAME_IW   = "IW.npy"
 FNAME_BIW  = "bias_IW.npy"
 FNAME_LW   = "LW.npy"
 FNAME_BOUT = "bias_out.npy"
 
+# ====================== Umbrales EMERREL (EDITAR AQUÍ) ======================
+# Bajo < THR_BAJO_MEDIO <= Medio <= THR_MEDIO_ALTO < Alto
+THR_BAJO_MEDIO = 0.020
+THR_MEDIO_ALTO = 0.079
+assert THR_MEDIO_ALTO > THR_BAJO_MEDIO, "THR_MEDIO_ALTO debe ser mayor que THR_BAJO_MEDIO"
+
+# ====================== Colores por nivel ======================
+COLOR_MAP = {"Bajo": "#2ca02c", "Medio": "#ff7f0e", "Alto": "#d62728"}  # verde / naranja / rojo
+COLOR_FALLBACK = "#808080"
+
 # ====================== Utilidades ======================
 def _fetch_bytes(url: str, timeout: int = 20) -> bytes:
-    """Descarga bytes desde una URL (GitHub RAW). Lanza error claro si falla."""
     try:
         req = Request(url, headers={"User-Agent": "Mozilla/5.0 (Streamlit ANN Loader)"})
         with urlopen(req, timeout=timeout) as resp:
@@ -36,7 +45,6 @@ def _fetch_bytes(url: str, timeout: int = 20) -> bytes:
 
 @st.cache_data(ttl=1800)
 def load_npy_from_fixed(filename: str) -> np.ndarray:
-    """Carga un .npy desde la base fija del repo AVEFA."""
     url = f"{GITHUB_BASE_URL}/{filename}"
     raw = _fetch_bytes(url)
     return np.load(BytesIO(raw), allow_pickle=True)
@@ -61,7 +69,8 @@ def validar_columnas_meteo(df: pd.DataFrame):
     return (len(faltan) == 0, "" if not faltan else f"Faltan columnas: {', '.join(sorted(faltan))}")
 
 def obtener_colores(niveles: pd.Series):
-    return niveles.map({"Bajo": "green", "Medio": "orange", "Alto": "red"}).fillna("gray")
+    # Devolvemos ndarray para que matplotlib no ignore el color
+    return niveles.map(COLOR_MAP).fillna(COLOR_FALLBACK).to_numpy()
 
 # ====================== Modelo ======================
 class PracticalANNModel:
@@ -85,24 +94,36 @@ class PracticalANNModel:
         z2 = self.LW @ a1 + self.bias_out
         return self.tansig(z2).item()
 
-    def predict(self, X_real):
+    def predict(self, X_real, thr_bajo_medio=THR_BAJO_MEDIO, thr_medio_alto=THR_MEDIO_ALTO):
         Xn = self.normalize_input(X_real)
         y = np.array([self._predict_single(x) for x in Xn])          # [-1..1]
         y = self.desnormalize_output(y)                               # [0..1]
-        ac = np.cumsum(y) / 8.05                                      # normalización de acumulado anual
+        ac = np.cumsum(y) / 8.05                                      # acumulado anual normalizado
         diff = np.diff(ac, prepend=0)
+
         def clas(v):
-            return "Bajo" if v < 0.2 else ("Medio" if v < 0.4 else "Alto")
+            if v < thr_bajo_medio:
+                return "Bajo"
+            elif v <= thr_medio_alto:
+                return "Medio"
+            else:
+                return "Alto"
+
         nivel = np.array([clas(v) for v in diff])
         return pd.DataFrame({"EMERREL(0-1)": diff, "Nivel_Emergencia_relativa": nivel})
 
 # ====================== UI ======================
 st.title("Predicción de Emergencia Agrícola AVEFA")
 
-# (SIN opciones para cargar pesos/sesgos; se cargan directo desde GITHUB_BASE_URL)
+# Pesos fijos (sin opciones en UI)
 with st.expander("Origen de pesos del modelo (.npy)", expanded=False):
     st.markdown(f"- **Repositorio**: `{GITHUB_BASE_URL}`")
     st.markdown(f"- Archivos: `{FNAME_IW}`, `{FNAME_BIW}`, `{FNAME_LW}`, `{FNAME_BOUT}`")
+
+with st.expander("Parámetros EMERREL (editables en código)", expanded=False):
+    st.markdown(f"- **Bajo→Medio**: `< {THR_BAJO_MEDIO:.3f}`")
+    st.markdown(f"- **Medio→Alto**: `≤ {THR_MEDIO_ALTO:.3f}`")
+    st.caption("Para cambiarlos, editar THR_BAJO_MEDIO y THR_MEDIO_ALTO al inicio del script.")
 
 st.sidebar.header("Meteo")
 csv_pages = st.sidebar.text_input("CSV (Pages)", value="https://GUILLE-bit.github.io/ANN/meteo_daily.csv")
@@ -114,7 +135,7 @@ umbral_usuario = st.sidebar.number_input("Umbral de EMEAC para 100%", min_value=
 if st.sidebar.button("Limpiar caché"):
     st.cache_data.clear()
 
-# --- Cargar pesos fijos desde tu GitHub ---
+# --- Cargar pesos desde tu GitHub ---
 try:
     IW      = load_npy_from_fixed(FNAME_IW)
     bias_IW = load_npy_from_fixed(FNAME_BIW)
@@ -125,7 +146,7 @@ except Exception as e:
     st.error(f"No pude cargar los .npy desde GitHub: {e}")
     st.stop()
 
-# Validaciones básicas de dimensiones
+# Validaciones básicas
 try:
     assert IW.shape[0] == 4, "IW debe ser de tamaño 4×H"
     assert bias_IW.shape[0] == IW.shape[1], "bias_IW debe tener tamaño H"
@@ -175,7 +196,11 @@ if dfs:
         X_real = df[["Julian_days", "TMIN", "TMAX", "Prec"]].to_numpy(float)
         fechas = pd.to_datetime(df["Fecha"])
 
-        pred = modelo.predict(X_real)
+        pred = modelo.predict(
+            X_real,
+            thr_bajo_medio=THR_BAJO_MEDIO,
+            thr_medio_alto=THR_MEDIO_ALTO
+        )
         pred["Fecha"] = fechas
         pred["Julian_days"] = df["Julian_days"]
         pred["EMERREL acumulado"] = pred["EMERREL(0-1)"].cumsum()
@@ -206,10 +231,10 @@ if dfs:
         for col in ["EMEAC (0-1) - mínimo (rango)", "EMEAC (0-1) - máximo (rango)", "EMEAC (0-1) - ajustable (rango)"]:
             pred_vis[col.replace("(0-1)", "(%)")] = (pred_vis[col] * 100).clip(0, 100)
 
-        # Colores por nivel (verde/naranja/rojo)
+        # Colores por nivel
         colores_vis = obtener_colores(pred_vis["Nivel_Emergencia_relativa"])
 
-        # --- Gráfico EMERREL (con leyenda de niveles) ---
+        # --- Gráfico EMERREL (barras coloreadas + leyenda por niveles) ---
         st.subheader(f"EMERREL (0-1) · {nombre} · {fi.date()} → {ff.date()} (reinicio 1/feb)")
         fig_er, ax_er = plt.subplots(figsize=(14, 5), dpi=150)
         ax_er.bar(pred_vis["Fecha"], pred_vis["EMERREL(0-1)"], color=colores_vis)
@@ -220,11 +245,10 @@ if dfs:
         ax_er.xaxis.set_major_locator(mdates.MonthLocator())
         ax_er.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
 
-        # Leyenda personalizada para niveles + línea MA5
         level_handles = [
-            Patch(facecolor="green", edgecolor="green", label="Bajo"),
-            Patch(facecolor="orange", edgecolor="orange", label="Medio"),
-            Patch(facecolor="red", edgecolor="red", label="Alto"),
+            Patch(facecolor=COLOR_MAP["Bajo"],  edgecolor=COLOR_MAP["Bajo"],  label=f"Bajo  (< {THR_BAJO_MEDIO:.3f})"),
+            Patch(facecolor=COLOR_MAP["Medio"], edgecolor=COLOR_MAP["Medio"], label=f"Medio (≤ {THR_MEDIO_ALTO:.3f})"),
+            Patch(facecolor=COLOR_MAP["Alto"],  edgecolor=COLOR_MAP["Alto"],  label=f"Alto  (> {THR_MEDIO_ALTO:.3f})"),
             line_ma
         ]
         ax_er.legend(handles=level_handles, title="Niveles EMERREL", loc="upper right")
@@ -242,15 +266,12 @@ if dfs:
         ax.xaxis.set_major_locator(mdates.MonthLocator()); ax.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
         ax.legend(loc="lower right"); st.pyplot(fig)
 
-        # --- Tabla y descarga (con colores en texto) ---
+        # --- Tabla y descarga ---
         st.subheader(f"Resultados (1/feb → 1/nov) - {nombre}")
         col_emeac = "EMEAC (%) - ajustable (rango)"
-
-        # Mapeo con íconos de color
         nivel_icono = {"Bajo": "🟢 Bajo", "Medio": "🟠 Medio", "Alto": "🔴 Alto"}
         tabla = pred_vis[["Fecha","Julian_days","Nivel_Emergencia_relativa",col_emeac]].copy()
         tabla["Nivel_Emergencia_relativa"] = tabla["Nivel_Emergencia_relativa"].map(nivel_icono)
-
         tabla = tabla.rename(columns={"Nivel_Emergencia_relativa":"Nivel de EMERREL", col_emeac:"EMEAC (%)"})
         st.dataframe(tabla, use_container_width=True)
 
@@ -262,3 +283,4 @@ if dfs:
             file_name=f"{nombre}_resultados_rango.csv",
             mime="text/csv"
         )
+
