@@ -1,3 +1,4 @@
+
 # app_emergencia.py
 import streamlit as st
 import numpy as np
@@ -9,20 +10,17 @@ from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 from pathlib import Path
 import os
-from urllib.parse import urlparse
 
 st.set_page_config(page_title="Predicción de Emergencia Agrícola AVEFA", layout="wide")
 
-# ====================== Utilidades de E/S segura ======================
-def safe_tmp_dir() -> Path:
-    p = Path(os.environ.get("TMPDIR", "/tmp"))
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+# ====================== Config pesos (fijado a tu repo) ======================
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/GUILLE-bit/AVEFA/main"
+FNAME_IW   = "IW.npy"
+FNAME_BIW  = "bias_IW.npy"
+FNAME_LW   = "LW.npy"
+FNAME_BOUT = "bias_out.npy"
 
-def tmp_path(filename: str) -> Path:
-    return safe_tmp_dir() / filename
-
-# ====================== Descarga y carga remota ======================
+# ====================== Utilidades ======================
 def _fetch_bytes(url: str, timeout: int = 20) -> bytes:
     """Descarga bytes desde una URL (GitHub RAW). Lanza error claro si falla."""
     try:
@@ -37,55 +35,12 @@ def _fetch_bytes(url: str, timeout: int = 20) -> bytes:
         raise RuntimeError(f"Error al descargar {url}: {e}")
 
 @st.cache_data(ttl=1800)
-def load_npy_from_url(url: str) -> np.ndarray:
+def load_npy_from_fixed(filename: str) -> np.ndarray:
+    """Carga un .npy desde la base fija del repo AVEFA."""
+    url = f"{GITHUB_BASE_URL}/{filename}"
     raw = _fetch_bytes(url)
     return np.load(BytesIO(raw), allow_pickle=True)
 
-def normalize_base_raw(base: str) -> str:
-    """
-    Acepta:
-      - RAW ya correcto: https://raw.githubusercontent.com/USER/REPO/BRANCH[/subpath]
-      - URL de GitHub 'blob': https://github.com/USER/REPO/blob/BRANCH/subpath
-    Devuelve siempre RAW base sin barra final.
-    """
-    base = base.strip().rstrip("/")
-    if "raw.githubusercontent.com" in base:
-        return base
-    if "github.com" in base and "/blob/" in base:
-        # convertir /github.com/u/r/blob/branch/path  -> /raw.githubusercontent.com/u/r/branch/path
-        parts = base.split("github.com/", 1)[1]  # USER/REPO/blob/BRANCH/...
-        user, repo, _blob, branch, *rest = parts.split("/")
-        raw = "https://raw.githubusercontent.com/" + "/".join([user, repo, branch] + rest)
-        return raw.rstrip("/")
-    return base  # dejar tal cual si es otra CDN válida
-
-def join_url(base: str, *segments: str) -> str:
-    base = base.rstrip("/")
-    segs = [s.strip("/") for s in segments if s and s.strip("/")]
-    return "/".join([base] + segs)
-
-def resolve_weight_url(base_raw: str, fname: str) -> tuple[str, str]:
-    """
-    Devuelve (url_encontrada, estrategia) probando:
-      1) base_raw/fname
-      2) base_raw/pesos/fname  (si la 1) falla)
-    """
-    base_raw = normalize_base_raw(base_raw)
-    candidates = [
-        ("raiz", join_url(base_raw, fname)),
-        ("carpeta_pesos", join_url(base_raw, "pesos", fname)),
-    ]
-    last_err = None
-    for tag, url in candidates:
-        try:
-            _ = _fetch_bytes(url)  # HEAD "manual" con GET corto: si responde, sirve
-            return url, tag
-        except Exception as e:
-            last_err = e
-            continue
-    raise RuntimeError(f"No se pudo localizar {fname} en la base dada. Último error: {last_err}")
-
-# ====================== CSV público ======================
 @st.cache_data(ttl=900)
 def load_public_csv(csv_pages: str, csv_raw: str):
     last_err = None
@@ -136,7 +91,7 @@ class PracticalANNModel:
         y = self.desnormalize_output(y)                               # [0..1]
         ac = np.cumsum(y) / 8.05                                      # normalización de acumulado anual
         diff = np.diff(ac, prepend=0)
-        def clas(v): 
+        def clas(v):
             return "Bajo" if v < 0.2 else ("Medio" if v < 0.4 else "Alto")
         nivel = np.array([clas(v) for v in diff])
         return pd.DataFrame({"EMERREL(0-1)": diff, "Nivel_Emergencia_relativa": nivel})
@@ -144,33 +99,10 @@ class PracticalANNModel:
 # ====================== UI ======================
 st.title("Predicción de Emergencia Agrícola AVEFA")
 
-st.sidebar.header("Pesos .npy (GitHub)")
-base_raw_in = st.sidebar.text_input(
-    "Base (puede ser RAW o URL con /blob/)",
-    value="https://raw.githubusercontent.com/USUARIO/REPO/main",  # SIN carpeta 'pesos' por tu caso actual
-    help="Ejemplos válidos: RAW (raw.githubusercontent.com/USER/REPO/BRANCH[/carpeta]) o github.com/USER/REPO/blob/BRANCH/carpeta"
-)
-
-fname_IW   = st.sidebar.text_input("Archivo IW.npy", value="IW.npy")
-fname_bIW  = st.sidebar.text_input("Archivo bias_IW.npy", value="bias_IW.npy")
-fname_LW   = st.sidebar.text_input("Archivo LW.npy", value="LW.npy")
-fname_bout = st.sidebar.text_input("Archivo bias_out.npy", value="bias_out.npy")
-
-colA, colB = st.sidebar.columns(2)
-with colA:
-    if st.button("Probar y resolver URLs"):
-        try:
-            url_IW, tag_IW     = resolve_weight_url(base_raw_in, fname_IW)
-            url_bIW, tag_bIW   = resolve_weight_url(base_raw_in, fname_bIW)
-            url_LW, tag_LW     = resolve_weight_url(base_raw_in, fname_LW)
-            url_bout, tag_bout = resolve_weight_url(base_raw_in, fname_bout)
-            st.success("Encontré rutas válidas para los 4 archivos ✅")
-            st.caption(f"IW: {url_IW}  ({tag_IW})")
-            st.caption(f"bias_IW: {url_bIW}  ({tag_bIW})")
-            st.caption(f"LW: {url_LW}  ({tag_LW})")
-            st.caption(f"bias_out: {url_bout}  ({tag_bout})")
-        except Exception as e:
-            st.error(str(e))
+# (SIN opciones para cargar pesos/sesgos; se cargan directo desde GITHUB_BASE_URL)
+with st.expander("Origen de pesos del modelo (.npy)", expanded=False):
+    st.markdown(f"- **Repositorio**: `{GITHUB_BASE_URL}`")
+    st.markdown(f"- Archivos: `{FNAME_IW}`, `{FNAME_BIW}`, `{FNAME_LW}`, `{FNAME_BOUT}`")
 
 st.sidebar.header("Meteo")
 csv_pages = st.sidebar.text_input("CSV (Pages)", value="https://GUILLE-bit.github.io/ANN/meteo_daily.csv")
@@ -182,20 +114,13 @@ umbral_usuario = st.sidebar.number_input("Umbral de EMEAC para 100%", min_value=
 if st.sidebar.button("Limpiar caché"):
     st.cache_data.clear()
 
-# --- Resolver y cargar pesos .npy desde GitHub (con autodetección raiz/pesos) ---
+# --- Cargar pesos fijos desde tu GitHub ---
 try:
-    url_IW, tag_IW     = resolve_weight_url(base_raw_in, fname_IW)
-    url_bIW, tag_bIW   = resolve_weight_url(base_raw_in, fname_bIW)
-    url_LW, tag_LW     = resolve_weight_url(base_raw_in, fname_LW)
-    url_bout, tag_bout = resolve_weight_url(base_raw_in, fname_bout)
-
-    IW      = load_npy_from_url(url_IW)
-    bias_IW = load_npy_from_url(url_bIW)
-    LW      = load_npy_from_url(url_LW)
-    bias_out = load_npy_from_url(url_bout).item()
-
+    IW      = load_npy_from_fixed(FNAME_IW)
+    bias_IW = load_npy_from_fixed(FNAME_BIW)
+    LW      = load_npy_from_fixed(FNAME_LW)
+    bias_out = load_npy_from_fixed(FNAME_BOUT).item()
     st.caption(f"Pesos cargados · H={IW.shape[1]} neuronas ocultas")
-    st.caption(f"(Origen detectado: {tag_IW}, {tag_bIW}, {tag_LW}, {tag_bout})")
 except Exception as e:
     st.error(f"No pude cargar los .npy desde GitHub: {e}")
     st.stop()
@@ -221,7 +146,8 @@ if fuente_meteo == "Automático (CSV público)":
     except Exception as e:
         st.error(f"No se pudo leer el CSV público: {e}")
 else:
-    ups = st.file_uploader("Subí uno o más .xlsx con columnas: Julian_days, TMAX, TMIN, Prec", type=["xlsx"], accept_multiple_files=True, key="meteo_xlsx")
+    ups = st.file_uploader("Subí uno o más .xlsx con columnas: Julian_days, TMAX, TMIN, Prec",
+                           type=["xlsx"], accept_multiple_files=True, key="meteo_xlsx")
     if ups:
         for f in ups:
             df_up = pd.read_excel(f)
@@ -320,5 +246,3 @@ if dfs:
             file_name=f"{nombre}_resultados_rango.csv",
             mime="text/csv"
         )
-
-
