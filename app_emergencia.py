@@ -242,7 +242,7 @@ if dfs:
         colores_vis = obtener_colores(pred_vis["Nivel_Emergencia_relativa"])
 
         # --- Gráfico EMERREL (barras coloreadas + leyenda por niveles) ---
-        st.subheader(f"EMERREL (0-1) · {nombre} · {fi.date()} → {ff.date()} (reinicio 1/feb)")
+        st.subheader("EMERGENCIA RELATIVA DIARIA")
         fig_er, ax_er = plt.subplots(figsize=(14, 5), dpi=150)
         ax_er.bar(pred_vis["Fecha"], pred_vis["EMERREL(0-1)"], color=colores_vis)
         line_ma, = ax_er.plot(pred_vis["Fecha"], pred_vis["EMERREL_MA5"], linewidth=2.2, label="Media móvil 5 días")
