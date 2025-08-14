@@ -1,5 +1,3 @@
-
-Tú dijiste:
 # app_emergencia.py
 import streamlit as st
 import numpy as np
