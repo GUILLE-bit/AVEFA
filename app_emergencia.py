@@ -21,20 +21,18 @@ FNAME_LW   = "LW.npy"
 FNAME_BOUT = "bias_out.npy"
 
 # ====================== Umbrales EMERREL (EDITAR AQUÍ) ======================
-# Bajo < THR_BAJO_MEDIO <= Medio <= THR_MEDIO_ALTO < Alto
 THR_BAJO_MEDIO = 0.020
 THR_MEDIO_ALTO = 0.079
 assert THR_MEDIO_ALTO > THR_BAJO_MEDIO, "THR_MEDIO_ALTO debe ser mayor que THR_BAJO_MEDIO"
 
 # ====================== Umbrales EMEAC (EDITAR AQUÍ) ======================
-# EMEAC se calcula a partir del acumulado de EMERREL dividido por estos denominadores
-EMEAC_MIN_DEN = 1.8   # “mínimo”
-EMEAC_ADJ_DEN = 2.1 # “ajustable”
-EMEAC_MAX_DEN = 2.5   # “máximo”
+EMEAC_MIN_DEN = 1.8
+EMEAC_ADJ_DEN = 2.1
+EMEAC_MAX_DEN = 2.5
 assert 0 < EMEAC_MIN_DEN <= EMEAC_ADJ_DEN <= EMEAC_MAX_DEN, "Asegurá MIN <= ADJ <= MAX"
 
 # ====================== Colores por nivel ======================
-COLOR_MAP = {"Bajo": "#2ca02c", "Medio": "#ff7f0e", "Alto": "#d62728"}  # verde / naranja / rojo
+COLOR_MAP = {"Bajo": "#2ca02c", "Medio": "#ff7f0e", "Alto": "#d62728"}
 COLOR_FALLBACK = "#808080"
 
 # ====================== Utilidades ======================
@@ -76,17 +74,15 @@ def validar_columnas_meteo(df: pd.DataFrame):
     return (len(faltan) == 0, "" if not faltan else f"Faltan columnas: {', '.join(sorted(faltan))}")
 
 def obtener_colores(niveles: pd.Series):
-    # Devolvemos ndarray para que matplotlib no ignore el color
     return niveles.map(COLOR_MAP).fillna(COLOR_FALLBACK).to_numpy()
 
 # ====================== Modelo ======================
 class PracticalANNModel:
     def __init__(self, IW, bias_IW, LW, bias_out):
-        self.IW = IW              # (4,H)
-        self.bias_IW = bias_IW    # (H,)
-        self.LW = LW              # (1,H)
-        self.bias_out = float(bias_out)  # escalar
-        # Orden de entrada esperado: [Julian_days, TMIN, TMAX, Prec]
+        self.IW = IW
+        self.bias_IW = bias_IW
+        self.LW = LW
+        self.bias_out = float(bias_out)
         self.input_min = np.array([1, -7, 0, 0], dtype=float)
         self.input_max = np.array([300, 25.5, 41, 84], dtype=float)
 
@@ -103,9 +99,9 @@ class PracticalANNModel:
 
     def predict(self, X_real, thr_bajo_medio=THR_BAJO_MEDIO, thr_medio_alto=THR_MEDIO_ALTO):
         Xn = self.normalize_input(X_real)
-        y = np.array([self._predict_single(x) for x in Xn])          # [-1..1]
-        y = self.desnormalize_output(y)                               # [0..1]
-        ac = np.cumsum(y) / 8.05                                      # acumulado anual normalizado
+        y = np.array([self._predict_single(x) for x in Xn])
+        y = self.desnormalize_output(y)
+        ac = np.cumsum(y) / 8.05
         diff = np.diff(ac, prepend=0)
 
         def clas(v):
@@ -122,7 +118,6 @@ class PracticalANNModel:
 # ====================== UI ======================
 st.title("Predicción de Emergencia Agrícola AVEFA")
 
-# Pesos fijos (sin opciones en UI)
 with st.expander("Origen de pesos del modelo (.npy)", expanded=False):
     st.markdown(f"- **Repositorio**: `{GITHUB_BASE_URL}`")
     st.markdown(f"- Archivos: `{FNAME_IW}`, `{FNAME_BIW}`, `{FNAME_LW}`, `{FNAME_BOUT}`")
@@ -153,7 +148,6 @@ except Exception as e:
     st.error(f"No pude cargar los .npy desde GitHub: {e}")
     st.stop()
 
-# Validaciones básicas
 try:
     assert IW.shape[0] == 4, "IW debe ser de tamaño 4×H"
     assert bias_IW.shape[0] == IW.shape[1], "bias_IW debe tener tamaño H"
@@ -199,28 +193,21 @@ if dfs:
             continue
 
         df = df.sort_values("Julian_days").reset_index(drop=True)
-        # Orden de variables esperado por los pesos: [Julian_days, TMIN, TMAX, Prec]
         X_real = df[["Julian_days", "TMIN", "TMAX", "Prec"]].to_numpy(float)
         fechas = pd.to_datetime(df["Fecha"])
 
-        pred = modelo.predict(
-            X_real,
-            thr_bajo_medio=THR_BAJO_MEDIO,
-            thr_medio_alto=THR_MEDIO_ALTO
-        )
+        pred = modelo.predict(X_real, thr_bajo_medio=THR_BAJO_MEDIO, thr_medio_alto=THR_MEDIO_ALTO)
         pred["Fecha"] = fechas
         pred["Julian_days"] = df["Julian_days"]
         pred["EMERREL acumulado"] = pred["EMERREL(0-1)"].cumsum()
         pred["EMERREL_MA5"] = pred["EMERREL(0-1)"].rolling(window=5, min_periods=1).mean()
 
-        # EMEAC (%) acumulado anual y rango (usando denominadores fijos del código)
         pred["EMEAC (0-1) - mínimo"]    = pred["EMERREL acumulado"] / EMEAC_MIN_DEN
         pred["EMEAC (0-1) - máximo"]    = pred["EMERREL acumulado"] / EMEAC_MAX_DEN
         pred["EMEAC (0-1) - ajustable"] = pred["EMERREL acumulado"] / EMEAC_ADJ_DEN
         for col in ["EMEAC (0-1) - mínimo", "EMEAC (0-1) - máximo", "EMEAC (0-1) - ajustable"]:
             pred[col.replace("(0-1)", "(%)")] = (pred[col] * 100).clip(0, 100)
 
-        # Rango 1/feb → 1/nov (reinicio)
         years = pred["Fecha"].dt.year.unique()
         yr = int(years[0]) if len(years) == 1 else int(st.sidebar.selectbox("Año (reinicio 1/feb → 1/nov)", sorted(years)))
         fi = pd.Timestamp(year=yr, month=2, day=1)
@@ -238,10 +225,9 @@ if dfs:
         for col in ["EMEAC (0-1) - mínimo (rango)", "EMEAC (0-1) - máximo (rango)", "EMEAC (0-1) - ajustable (rango)"]:
             pred_vis[col.replace("(0-1)", "(%)")] = (pred_vis[col] * 100).clip(0, 100)
 
-        # Colores por nivel (verde/naranja/rojo)
         colores_vis = obtener_colores(pred_vis["Nivel_Emergencia_relativa"])
 
-        # --- Gráfico EMERREL (barras coloreadas + leyenda por niveles) ---
+        # --- Gráfico EMERREL ---
         st.subheader("EMERGENCIA RELATIVA DIARIA")
         fig_er, ax_er = plt.subplots(figsize=(14, 5), dpi=150)
         ax_er.bar(pred_vis["Fecha"], pred_vis["EMERREL(0-1)"], color=colores_vis)
@@ -251,7 +237,6 @@ if dfs:
         ax_er.set_xlim(fi, ff)
         ax_er.xaxis.set_major_locator(mdates.MonthLocator())
         ax_er.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
-
         level_handles = [
             Patch(facecolor=COLOR_MAP["Bajo"],  edgecolor=COLOR_MAP["Bajo"],  label=f"Bajo  (< {THR_BAJO_MEDIO:.3f})"),
             Patch(facecolor=COLOR_MAP["Medio"], edgecolor=COLOR_MAP["Medio"], label=f"Medio (≤ {THR_MEDIO_ALTO:.3f})"),
@@ -262,7 +247,7 @@ if dfs:
         st.pyplot(fig_er)
 
         # --- Gráfico EMEAC ---
-        st.subheader(f"EMEAC (%) · {nombre} · {fi.date()} → {ff.date()} (reinicio 1/feb)")
+        st.subheader("EMERGENCIA ACUMULADA DIARIA")
         fig, ax = plt.subplots(figsize=(14, 5), dpi=150)
         ax.fill_between(pred_vis["Fecha"], pred_vis["EMEAC (%) - mínimo (rango)"], pred_vis["EMEAC (%) - máximo (rango)"], alpha=0.35, label="Rango min–max")
         ax.plot(pred_vis["Fecha"], pred_vis["EMEAC (%) - ajustable (rango)"], linewidth=2.5, label=f"Aj. (/{EMEAC_ADJ_DEN:.2f})")
@@ -290,5 +275,4 @@ if dfs:
             file_name=f"{nombre}_resultados_rango.csv",
             mime="text/csv"
         )
-
 
