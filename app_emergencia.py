@@ -1,3 +1,5 @@
+
+Tú dijiste:
 # app_emergencia.py
 import streamlit as st
 import numpy as np
@@ -119,15 +121,15 @@ class PracticalANNModel:
 st.title("Predicción de Emergencia Agrícola AVEFA")
 
 with st.expander("Origen de pesos del modelo (.npy)", expanded=False):
-    st.markdown(f"- **Repositorio**: `{GITHUB_BASE_URL}`")
-    st.markdown(f"- Archivos: `{FNAME_IW}`, `{FNAME_BIW}`, `{FNAME_LW}`, `{FNAME_BOUT}`")
+    st.markdown(f"- **Repositorio**: {GITHUB_BASE_URL}")
+    st.markdown(f"- Archivos: {FNAME_IW}, {FNAME_BIW}, {FNAME_LW}, {FNAME_BOUT}")
 
 with st.expander("Parámetros (editables en código)", expanded=False):
     st.markdown(f"**EMERREL**:")
-    st.markdown(f"- Bajo→Medio: `< {THR_BAJO_MEDIO:.3f}`")
-    st.markdown(f"- Medio→Alto: `≤ {THR_MEDIO_ALTO:.3f}`")
+    st.markdown(f"- Bajo→Medio: < {THR_BAJO_MEDIO:.3f}")
+    st.markdown(f"- Medio→Alto: ≤ {THR_MEDIO_ALTO:.3f}")
     st.markdown(f"**EMEAC** (denominadores):")
-    st.markdown(f"- Mínimo: `{EMEAC_MIN_DEN:.2f}` · Ajustable: `{EMEAC_ADJ_DEN:.2f}` · Máximo: `{EMEAC_MAX_DEN:.2f}`")
+    st.markdown(f"- Mínimo: {EMEAC_MIN_DEN:.2f} · Ajustable: {EMEAC_ADJ_DEN:.2f} · Máximo: {EMEAC_MAX_DEN:.2f}")
 
 st.sidebar.header("Meteo")
 csv_pages = st.sidebar.text_input("CSV (Pages)", value="https://GUILLE-bit.github.io/ANN/meteo_daily.csv")
@@ -227,61 +229,24 @@ if dfs:
 
         colores_vis = obtener_colores(pred_vis["Nivel_Emergencia_relativa"])
 
-        # --- Gráfico EMERREL con semáforo rojo ---
-        # app_emergencia.py (fragmento con semáforo rojo en gráfico EMERREL)
-        # (Este bloque reemplaza el gráfico EMERREL original)
-
-        # --- Gráfico EMERREL con semáforo rojo ---
+        # --- Gráfico EMERREL ---
         st.subheader("EMERGENCIA RELATIVA DIARIA")
         fig_er, ax_er = plt.subplots(figsize=(14, 5), dpi=150)
-
-        # Dibujar barras coloreadas
         ax_er.bar(pred_vis["Fecha"], pred_vis["EMERREL(0-1)"], color=colores_vis)
-
-        # Media móvil
         line_ma, = ax_er.plot(pred_vis["Fecha"], pred_vis["EMERREL_MA5"], linewidth=2.2, label="Media móvil 5 días")
-
-        # Detectar días con alerta futura "Alto"
-        futuro_dias = 12
-        fechas_alerta = []
-        for idx, row in pred_vis.iterrows():
-            fecha_actual = row["Fecha"]
-            fecha_limite = fecha_actual + pd.Timedelta(days=futuro_dias)
-            futuros = pred[(pred["Fecha"] > fecha_actual) & (pred["Fecha"] <= fecha_limite)]
-            if (futuros["Nivel_Emergencia_relativa"] == "Alto").any():
-                fechas_alerta.append(fecha_actual)
-
-        # Dibujar círculos rojos sobre las barras
-        for fecha in fechas_alerta:
-            y_val = pred_vis.loc[pred_vis["Fecha"] == fecha, "EMERREL(0-1)"].values
-            if len(y_val) > 0:
-                ax_er.plot(fecha, y_val[0] + 0.01, marker='o', markersize=10, color='red', label='Alerta futura')
-
-        # Ajustes del gráfico
         ax_er.grid(True, linestyle="--", alpha=0.5)
-        ax_er.set_xlabel("Fecha")
-        ax_er.set_ylabel("EMERREL (0-1)")
+        ax_er.set_xlabel("Fecha"); ax_er.set_ylabel("EMERREL (0-1)")
         ax_er.set_xlim(fi, ff)
         ax_er.xaxis.set_major_locator(mdates.MonthLocator())
         ax_er.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
-
-        # Leyenda sin duplicados
         level_handles = [
             Patch(facecolor=COLOR_MAP["Bajo"],  edgecolor=COLOR_MAP["Bajo"],  label=f"Bajo  (< {THR_BAJO_MEDIO:.3f})"),
             Patch(facecolor=COLOR_MAP["Medio"], edgecolor=COLOR_MAP["Medio"], label=f"Medio (≤ {THR_MEDIO_ALTO:.3f})"),
             Patch(facecolor=COLOR_MAP["Alto"],  edgecolor=COLOR_MAP["Alto"],  label=f"Alto  (> {THR_MEDIO_ALTO:.3f})"),
             line_ma
         ]
-
-        # Agregar etiqueta de alerta si hay al menos una
-        if fechas_alerta:
-            level_handles.append(Patch(facecolor='red', edgecolor='red', label="🔴 Alerta futura (≤ 12 días)"))
-
         ax_er.legend(handles=level_handles, title="Niveles EMERREL", loc="upper right")
-
-        # Mostrar gráfico
         st.pyplot(fig_er)
-
 
         # --- Gráfico EMEAC ---
         st.subheader("EMERGENCIA ACUMULADA DIARIA")
@@ -312,4 +277,3 @@ if dfs:
             file_name=f"{nombre}_resultados_rango.csv",
             mime="text/csv"
         )
-
