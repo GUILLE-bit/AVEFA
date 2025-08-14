@@ -230,8 +230,28 @@ if dfs:
         # --- Gráfico EMERREL ---
         st.subheader("EMERGENCIA RELATIVA DIARIA")
         fig_er, ax_er = plt.subplots(figsize=(14, 5), dpi=150)
+
+        # Área cerrada desde 0 hasta la media móvil (celeste claro), debajo de las barras
+        ax_er.fill_between(
+            pred_vis["Fecha"],
+            0,
+            pred_vis["EMERREL_MA5"],
+            color="skyblue",
+            alpha=0.3,
+            zorder=0
+        )
+
+        # Barras de colores según nivel de riesgo
         ax_er.bar(pred_vis["Fecha"], pred_vis["EMERREL(0-1)"], color=colores_vis)
-        line_ma, = ax_er.plot(pred_vis["Fecha"], pred_vis["EMERREL_MA5"], linewidth=2.2, label="Media móvil 5 días")
+
+        # Línea de media móvil
+        line_ma, = ax_er.plot(
+            pred_vis["Fecha"],
+            pred_vis["EMERREL_MA5"],
+            linewidth=2.2,
+            label="Media móvil 5 días"
+        )
+
         ax_er.grid(True, linestyle="--", alpha=0.5)
         ax_er.set_xlabel("Fecha"); ax_er.set_ylabel("EMERREL (0-1)")
         ax_er.set_xlim(fi, ff)
