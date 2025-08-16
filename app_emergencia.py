@@ -117,11 +117,11 @@ class PracticalANNModel:
 # ====================== UI ======================
 st.title("Predicción de Emergencia Agrícola AVEFA")
 
-# with st.expander("Origen de pesos del modelo (.npy)", expanded=False):
+ with st.expander("Origen de pesos del modelo (.npy)", expanded=False):
     st.markdown(f"- **Repositorio**: {GITHUB_BASE_URL}")
     st.markdown(f"- Archivos: {FNAME_IW}, {FNAME_BIW}, {FNAME_LW}, {FNAME_BOUT}")
 
-# with st.expander("Parámetros (editables en código)", expanded=False):
+ with st.expander("Parámetros (editables en código)", expanded=False):
     st.markdown(f"**EMERREL**:")
     st.markdown(f"- Bajo→Medio: < {THR_BAJO_MEDIO:.3f}")
     st.markdown(f"- Medio→Alto: ≤ {THR_MEDIO_ALTO:.3f}")
