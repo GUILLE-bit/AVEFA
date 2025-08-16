@@ -117,11 +117,11 @@ class PracticalANNModel:
 # ====================== UI ======================
 st.title("Predicción de Emergencia Agrícola AVEFA")
 
-with st.expander("Origen de pesos del modelo (.npy)", expanded=False):
+# with st.expander("Origen de pesos del modelo (.npy)", expanded=False):
     st.markdown(f"- **Repositorio**: {GITHUB_BASE_URL}")
     st.markdown(f"- Archivos: {FNAME_IW}, {FNAME_BIW}, {FNAME_LW}, {FNAME_BOUT}")
 
-with st.expander("Parámetros (editables en código)", expanded=False):
+# with st.expander("Parámetros (editables en código)", expanded=False):
     st.markdown(f"**EMERREL**:")
     st.markdown(f"- Bajo→Medio: < {THR_BAJO_MEDIO:.3f}")
     st.markdown(f"- Medio→Alto: ≤ {THR_MEDIO_ALTO:.3f}")
@@ -228,7 +228,7 @@ if dfs:
         colores_vis = obtener_colores(pred_vis["Nivel_Emergencia_relativa"])
 
         # ===================== Gráfico 1: EMERGENCIA RELATIVA DIARIA (Plotly) =====================
-        st.subheader("EMERGENCIA RELATIVA DIARIA")
+        st.subheader("EMERGENCIA RELATIVA DIARIA - BORDENAVE")
         fig_er = go.Figure()
 
         # Barras por nivel (colores)
@@ -283,7 +283,7 @@ if dfs:
         ))
 
         fig_er.update_layout(
-            title="EMERGENCIA RELATIVA DIARIA",
+          # title="EMERGENCIA RELATIVA DIARIA",
             xaxis_title="Fecha",
             yaxis_title="EMERREL (0-1)",
             hovermode="x unified",
@@ -295,7 +295,7 @@ if dfs:
         st.plotly_chart(fig_er, use_container_width=True, theme="streamlit")
 
         # ===================== Gráfico 2: EMERGENCIA ACUMULADA DIARIA (Plotly) =====================
-        st.subheader("EMERGENCIA ACUMULADA DIARIA")
+        st.subheader("EMERGENCIA ACUMULADA DIARIA - BORDENAVE")
         fig = go.Figure()
 
         # Banda entre mínimo y máximo
@@ -348,7 +348,7 @@ if dfs:
             fig.add_hline(y=nivel, line_dash="dash", opacity=0.6, annotation_text=f"{nivel}%")
 
         fig.update_layout(
-            title="EMERGENCIA ACUMULADA DIARIA",
+          # title="EMERGENCIA ACUMULADA DIARIA",
             xaxis_title="Fecha",
             yaxis_title="EMEAC (%)",
             yaxis=dict(range=[0, 100]),
